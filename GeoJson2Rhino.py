@@ -1,75 +1,16 @@
 """
-Allows for the translation of GeoJSON data to Rhino objects
+sample.geojson
 
-GeoJSON _does_ support 3d, so this can take 3d coordinates for 3d GeoJSONs
-
-The GeoJSON Format Specification can be found here:
-    http://geojson.org/geojson-spec.html
-
-The RhinoCommon SDK (where all the Rhino.Geometry objects are documented) is
-here:
-    http://www.rhino3d.com/5/rhinocommon/
-
-I have decided to extend the GeoJSON specification by adding support for one
-more type of geometry that would be really useful in Rhino (and elsewhere),
-the Mesh. Here is an example of a json Mesh:
-
-    {"type": "Feature",
-     "geometry": {
-                  "type": "Mesh",
-                  "coordinates": [
-                                  [3.43, 54.234, 2343.23],
-                                  [...],
-                                  [...],
-                                  ...,
-                                  ]
-                  "faces": [
-                            [0,3,2],
-                            [5,32,1],
-                            ...,
-                            ]
-                  }
-      "properties": {"prop0": "value0"}
-      }
-
-
-Example of Use:
-    >>> import GeoJson2Rhino as geoj
-    >>> myGeoJson = '''
-{ "type": "FeatureCollection",
-  "features": [
-    { "type": "Feature",
-      "geometry": {"type": "Point", "coordinates": [102.0, 0.5]},
-      "properties": {"prop0": "value0"}
-      },
-    { "type": "Feature",
-      "geometry": {
-        "type": "LineString",
-        "coordinates": [
-          [102.0, 0.0], [103.0, 1.0], [104.0, 0.0], [105.0, 1.0]
-          ]
-        },
-      "properties": {
-        "prop0": "value0",
-        "prop1": 0.0
-        }
-      },
-    { "type": "Feature",
-       "geometry": {
-         "type": "Polygon",
-         "coordinates": [
-           [ [100.0, 0.0], [101.0, 0.0], [101.0, 1.0],
-             [100.0, 1.0], [100.0, 0.0] ]
-           ]
-       },
-       "properties": {
-         "prop0": "value0",
-         "prop1": {"this": "that"}
-         }
-       }
-     ]
-   }'''
-   >>> guidList = geoj.load(myGeoJson) #stores guids of new rhino objects
+{
+"type": "FeatureCollection",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::5179" } },
+                                                                                                                                  
+"features": [
+{ "type": "Feature", "properties": { "ELEVATION": 86.366000, "BLDG_H_GRD": 9.000000 }, "geometry": { "type": "MultiPolygon", "coordinates": [ [ [ [ 954500.23712887894, 1949631.5497937908 ], [ 954494.88178503397, 1949626.4041389083 ], [ 954486.86899364996, 1949635.6561309656 ], [ 954492.39222866215, 1949639.8904212238 ], [ 954500.23712887894, 1949631.5497937908 ] ] ] ] } },
+{ "type": "Feature", "properties": { "ELEVATION": 89.055000, "BLDG_H_GRD": 10.200000 }, "geometry": { "type": "MultiPolygon", "coordinates": [ [ [ [ 954505.21004369832, 1949626.4383810216 ], [ 954497.39477998379, 1949619.2425518287 ], [ 954493.1117052373, 1949624.0135174387 ], [ 954501.08706631768, 1949631.2384844164 ], [ 954505.21004369832, 1949626.4383810216 ] ] ] ] } },
+{ "type": "Feature", "properties": { "ELEVATION": 91.442000, "BLDG_H_GRD": 0.000000 }, "geometry": { "type": "MultiPolygon", "coordinates": [ [ [ [ 954507.8029442078, 1949623.4938485734 ], [ 954502.83574490668, 1949619.1347452225 ], [ 954502.27216590289, 1949619.3636608864 ], [ 954500.28702308412, 1949618.2436254704 ], [ 954499.38958800654, 1949619.6048090158 ], [ 954505.78312445979, 1949625.6277245362 ], [ 954507.8029442078, 1949623.4938485734 ] ] ] ] } }
+]
+}
 
 """
 
@@ -83,6 +24,7 @@ from scriptcontext import doc
 
 # import .NET libraries
 import System
+import math
 
 
 def addRhinoLayer(layerName, layerColor=System.Drawing.Color.Black):
@@ -98,19 +40,19 @@ def addRhinoLayer(layerName, layerColor=System.Drawing.Color.Black):
         if layer.Color != layerColor: # if it has a different color
             layer.Color = layerColor # reset the color
     return layerIndex
-
-def PointToRhinoPoint(coordinates):
+    
+def PointToRhinoPoint(coordinates, elevation):
     if len(coordinates) > 2:
         z = coordinates[2]
     else:
-        z = 0.0
+        z = elevation
     x, y = coordinates[0], coordinates[1]
     return Point3d(x, y, z)
-
-def MultiPointToRhinoPoint(coordinates):
+    
+def MultiPointToRhinoPoint(coordinates, elevation):
     rhPointList = []
     for point in coordinates:
-        rhPointList.append(PointToRhinoPoint(point))
+        rhPointList.append(PointToRhinoPoint(point, elevation))
     return rhPointList
 
 def MeshToRhinoMesh(coordinates, faces):
@@ -126,8 +68,8 @@ def MeshToRhinoMesh(coordinates, faces):
     rhMesh.Compact()
     return rhMesh
 
-def LineStringToRhinoCurve(coordinates):
-    rhPoints = MultiPointToRhinoPoint(coordinates)
+def LineStringToRhinoCurve(coordinates, elevation):
+    rhPoints = MultiPointToRhinoPoint(coordinates, elevation)
     return Curve.CreateControlPointCurve(rhPoints, 1)
 
 def MultiLineStringToRhinoCurve(coordinates):
@@ -136,17 +78,20 @@ def MultiLineStringToRhinoCurve(coordinates):
         rhCurveList.append(LineStringToRhinoCurve(lineString))
     return rhCurveList
 
-def PolygonToRhinoCurve(coordinates):
+def PolygonToRhinoCurve(coordinates, height, elevation):
     # each ring is a separate list of coordinates
     ringList = []
     for ring in coordinates:
-        ringList.append(LineStringToRhinoCurve(ring))
+        rc = LineStringToRhinoCurve(ring, elevation)
+        pgm = Rhino.Geometry.Extrusion.Create(rc, height*-1, True)
+        ringList.append(pgm)
     return ringList
 
-def MultiPolygonToRhinoCurve(coordinates):
+def MultiPolygonToRhinoCurve(coordinates, height, elevation):
     polygonList = []
     for polygon in coordinates:
-        polygonList.append(PolygonToRhinoCurve(polygon))
+        pg = PolygonToRhinoCurve(polygon, height, elevation)
+        polygonList.append(pg)
     return polygonList
 
 def GeometryCollectionToParser(geometries):
@@ -162,7 +107,7 @@ def addPoints(rhPoints, objAtt):
     return guidList
 
 def addCurve(rhCurve, objAtt):
-    return doc.Objects.AddCurve(rhCurve, objAtt)
+    return doc.Objects.AddExtrusion(rhCurve, objAtt)
 
 def addCurves(rhCurves, objAtt):
     guidList = []
@@ -207,20 +152,22 @@ def jsonToRhinoCommon(jsonFeature):
         geom = jsonFeature['geometry']
         geomType = geom['type'] # this will return a mappable string
         coordinates = geom['coordinates']
+        elevation = jsonFeature['properties']['ELEVATION'] #이 부분은 건물의 바닥면 해발고도 속성 이름(m)
+        height = jsonFeature['properties']['BLDG_H_GRD'] #이 부분은 건물의 높이 속성 이름(m)
         # if this is a mesh, pass the faces
         if geomType == 'Mesh':
             faces = geom['faces']
             rhFeature = geoJsonGeometryMap[geomType][0](coordinates, faces)
         # translate the coordinates to Rhino.Geometry objects
         else:
-            rhFeature = geoJsonGeometryMap[geomType][0](coordinates)
+            rhFeature = geoJsonGeometryMap[geomType][0](coordinates, height, elevation) #만약, 고저차 없이 평지에 건물을 두려면 여기서 elevation대신 0으로 대체한다.
         return rhFeature
-
+    
 def addJsonFeature(jsonFeature, objAttributes):
         # deal with the properties
         if jsonFeature['properties']:
             objAttributes = setUserKeys(jsonFeature['properties'], objAttributes)
-        geomType = jsonFeature['geometry']['type']
+        geomType = jsonFeature['geometry']['type']        
         rhFeature = jsonToRhinoCommon(jsonFeature)
         # return the GUID(s) for the feature
         return geoJsonGeometryMap[geomType][1](rhFeature, objAttributes)
